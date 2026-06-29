@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🐱 小组互评系统 - 喵~</title>
 <link rel="stylesheet" href="style.css">
-<!-- Supabase JS 客户端 CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -35,29 +33,8 @@
     <p class="subtitle">实训结课作业 · 商务数据驱动决策实战</p>
   </header>
 
-  <!-- 初次配置面板 -->
-  <section id="setupScreen" class="setup-screen hidden">
-    <div class="setup-card">
-      <div class="setup-cat">🐱</div>
-      <h2>首次使用 · 配置数据库</h2>
-      <p>请从 Supabase 项目设置中获取连接信息</p>
-      <div class="setup-form">
-        <div class="form-group">
-          <label>📡 Supabase 项目 URL</label>
-          <input type="text" id="setupUrl" placeholder="https://xxxxx.supabase.co">
-        </div>
-        <div class="form-group">
-          <label>🔑 Supabase Anon Key</label>
-          <input type="password" id="setupKey" placeholder="eyJhbGci...">
-        </div>
-        <button class="submit-btn" onclick="saveSetup()">🐾 连接数据库</button>
-      </div>
-      <p class="setup-hint">此配置将保存在浏览器中，下次访问无需重新输入</p>
-    </div>
-  </section>
-
   <!-- 班级选择页 -->
-  <section id="classSelect" class="class-select hidden">
+  <section id="classSelect" class="class-select">
     <div class="class-cards">
       <div class="class-card" onclick="selectClass('class1')">
         <div class="card-cat">🐱</div>
