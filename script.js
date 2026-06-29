@@ -1,7 +1,12 @@
-/* ===== 猫猫互评系统 - 前端逻辑 v2 (Supabase 直连) ===== */
+/* ===== 猫猫互评系统 - 前端逻辑 v3 (原生 fetch + Supabase REST API) ===== */
 
-// Supabase 客户端
-let supabase = null;
+// Supabase REST API 配置（从 config.js 读取）
+const API_BASE = SUPABASE_URL + '/rest/v1';
+const API_HEADERS = {
+  'apikey': SUPABASE_ANON_KEY,
+  'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+  'Content-Type': 'application/json'
+};
 
 // 全局状态
 let state = {
@@ -9,69 +14,16 @@ let state = {
   currentEvaluator: null,
   currentTarget: null,
   groups: [],
-  scores: [],           // [{ evaluator_group, target_group, dim1..5 }]
-  classPassword: null   // 当前班级口令（已验证）
+  scores: [],
+  classPassword: null,
+  _lastRankings: null
 };
 
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
   createPawBackground();
-  initSupabase();
-  checkSetup();
-});
-
-function initSupabase() {
-  // 优先使用 localStorage 中保存的配置
-  const savedUrl = localStorage.getItem('supabase_url');
-  const savedKey = localStorage.getItem('supabase_key');
-  if (savedUrl && savedKey) {
-    supabase = window.supabase.createClient(savedUrl, savedKey);
-    return;
-  }
-  // 其次使用 config.js 中的硬编码配置
-  if (SUPABASE_URL && SUPABASE_URL !== 'https://YOUR-PROJECT.supabase.co') {
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  }
-}
-
-function checkSetup() {
-  if (!supabase) {
-    showSetupScreen();
-    return;
-  }
-  // Supabase 已配置，显示班级选择
   document.getElementById('classSelect').classList.remove('hidden');
-}
-
-function showSetupScreen() {
-  document.getElementById('classSelect').classList.add('hidden');
-  document.getElementById('mainApp').classList.add('hidden');
-  document.getElementById('setupScreen').classList.remove('hidden');
-}
-
-async function saveSetup() {
-  const url = document.getElementById('setupUrl').value.trim();
-  const key = document.getElementById('setupKey').value.trim();
-  if (!url || !key) {
-    showToast('😿 请填写完整配置信息~');
-    return;
-  }
-  try {
-    const testClient = window.supabase.createClient(url, key);
-    const { error } = await testClient.from('scores').select('id', { count: 'exact', head: true });
-    if (error) {
-      showToast('😿 连接失败：' + error.message);
-      return;
-    }
-    // 连接成功，保存并重新加载
-    localStorage.setItem('supabase_url', url);
-    localStorage.setItem('supabase_key', key);
-    showToast('🐱 连接成功！正在初始化...');
-    location.reload();
-  } catch (e) {
-    showToast('😿 连接失败：' + e.message);
-  }
-}
+});
 
 function createPawBackground() {
   const bg = document.getElementById('pawBackground');
@@ -101,7 +53,6 @@ function showToast(msg) {
 
 // ===== 班级口令验证 =====
 function verifyPassword(classId) {
-  // 检查是否已缓存口令
   const cached = sessionStorage.getItem(`pwd_${classId}`);
   if (cached === 'ok') return true;
 
@@ -117,15 +68,48 @@ function verifyPassword(classId) {
   return false;
 }
 
-// ===== 加载评分数据 =====
+// ===== Supabase REST API 操作 =====
 async function loadScores(classId) {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('scores')
-    .select('*')
-    .eq('class_id', classId);
-  if (error) { console.error(error); return []; }
-  return data || [];
+  try {
+    const resp = await fetch(`${API_BASE}/scores?class_id=eq.${classId}`, {
+      headers: API_HEADERS
+    });
+    if (!resp.ok) { console.error('loadScores error:', resp.status); return []; }
+    return await resp.json() || [];
+  } catch (e) {
+    console.error('loadScores:', e);
+    return [];
+  }
+}
+
+async function upsertScore(scoreRow) {
+  // 先尝试更新，如果不存在则插入
+  const filterUrl = `${API_BASE}/scores?class_id=eq.${scoreRow.class_id}&evaluator_group=eq.${scoreRow.evaluator_group}&target_group=eq.${scoreRow.target_group}`;
+  
+  // upsert：使用 Prefer header 实现合并
+  const resp = await fetch(`${API_BASE}/scores`, {
+    method: 'POST',
+    headers: {
+      ...API_HEADERS,
+      'Prefer': 'resolution=merge-duplicates'
+    },
+    body: JSON.stringify(scoreRow)
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`提交失败 (${resp.status}): ${errText}`);
+  }
+  return true;
+}
+
+async function deleteScores(classId) {
+  const resp = await fetch(`${API_BASE}/scores?class_id=eq.${classId}`, {
+    method: 'DELETE',
+    headers: API_HEADERS
+  });
+  if (!resp.ok) throw new Error(`删除失败 (${resp.status})`);
+  return true;
 }
 
 // ===== 班级选择 =====
@@ -136,14 +120,10 @@ async function selectClass(classId) {
   state.currentEvaluator = null;
   state.currentTarget = null;
 
-  // 从本地常量加载分组和维度
   state.groups = CLASS_DATA[classId].groups;
   state.dimensions = DIMENSIONS;
-
-  // 从 Supabase 加载已有评分
   state.scores = await loadScores(classId);
 
-  // 显示主界面
   document.getElementById('classSelect').classList.add('hidden');
   document.getElementById('mainApp').classList.remove('hidden');
   document.getElementById('className').textContent = CLASS_DATA[classId].name;
@@ -157,7 +137,6 @@ function goBack() {
   state.currentEvaluator = null;
   state.currentTarget = null;
   state.scores = [];
-  sessionStorage.removeItem(`pwd_${state.currentClass}`);
   document.getElementById('classSelect').classList.remove('hidden');
   document.getElementById('mainApp').classList.add('hidden');
 }
@@ -177,7 +156,7 @@ function switchTab(tab) {
   }
 }
 
-// ===== 渲染评估者列表（含完成进度） =====
+// ===== 渲染评估者列表 =====
 function renderEvaluators() {
   const container = document.getElementById('evaluatorList');
   container.innerHTML = state.groups.map(g => {
@@ -238,7 +217,6 @@ function openScoreModal(targetGroupId) {
   const targetGroup = state.groups.find(g => g.id === targetGroupId);
   document.getElementById('modalTitle').textContent = `为 ${targetGroup.name} 打分`;
 
-  // 查找已有评分
   const existing = state.scores.find(
     s => s.evaluator_group === state.currentEvaluator && s.target_group === targetGroupId
   );
@@ -247,7 +225,7 @@ function openScoreModal(targetGroupId) {
 
   document.getElementById('modalBody').innerHTML = state.dimensions.map(d => {
     const dimKey = 'dim' + d.id;
-    const val = existing ? (existing[dimKey] || Math.round(d.maxScore * 0.7)) : Math.round(d.maxScore * 0.7);
+    const val = existing ? (existing[dimKey] !== undefined ? existing[dimKey] : Math.round(d.maxScore * 0.7)) : Math.round(d.maxScore * 0.7);
     const catIdx = Math.min(Math.floor(val / d.maxScore * 4), 4);
     return `
       <div class="dim-item">
@@ -297,13 +275,8 @@ function closeModal() {
   state.currentTarget = null;
 }
 
-// ===== 提交评分（Supabase upsert） =====
+// ===== 提交评分 =====
 async function submitScore() {
-  if (!supabase) {
-    showToast('😿 数据库未连接，请联系管理员');
-    return;
-  }
-
   const scoreRow = {
     class_id: state.currentClass,
     evaluator_group: state.currentEvaluator,
@@ -314,26 +287,20 @@ async function submitScore() {
     scoreRow['dim' + d.id] = parseFloat(slider.value);
   });
 
-  const { data, error } = await supabase
-    .from('scores')
-    .upsert(scoreRow, { onConflict: 'class_id,evaluator_group,target_group' })
-    .select();
-
-  if (error) {
-    console.error(error);
-    showToast('😿 提交失败：' + error.message);
-    return;
+  try {
+    await upsertScore(scoreRow);
+    state.scores = await loadScores(state.currentClass);
+    showToast('🐱 评分已保存！喵~');
+    closeModal();
+    renderEvaluators();
+    renderTargets();
+  } catch (e) {
+    console.error(e);
+    showToast('😿 ' + e.message);
   }
-
-  // 刷新本地缓存
-  state.scores = await loadScores(state.currentClass);
-  showToast('🐱 评分已保存！喵~');
-  closeModal();
-  renderEvaluators();
-  renderTargets();
 }
 
-// ===== 排名面板 =====
+// ===== 排名计算 =====
 function calculateRankings() {
   const groups = state.groups;
   const dimensions = state.dimensions;
@@ -378,8 +345,8 @@ function calculateRankings() {
   return rankings;
 }
 
+// ===== 排名面板 =====
 async function loadRankings() {
-  // 先从 Supabase 刷新数据
   state.scores = await loadScores(state.currentClass);
 
   const rankings = calculateRankings();
@@ -392,7 +359,6 @@ async function loadRankings() {
     最高分：<span>${rankings[0]?.average_total || 0} 分</span>
   `;
 
-  // 柱状图
   const maxScore = Math.max(...rankings.map(r => r.average_total), 1);
   document.getElementById('rankingChart').innerHTML = `
     <div class="chart-title">🐱 小组平均分排行</div>
@@ -418,7 +384,6 @@ async function loadRankings() {
     }).join('')}
   `;
 
-  // 排行列表
   document.getElementById('rankingList').innerHTML = `
     <h3 style="color:var(--warm-brown);margin-bottom:15px;">🏆 详细排名</h3>
     ${rankings.length === 0 ? '<div class="empty-state"><div class="empty-cat">😿</div><p>暂未有人评分，快去评分吧~</p></div>' : ''}
@@ -444,7 +409,6 @@ async function loadRankings() {
     }).join('')}
   `;
 
-  // 存储排名供 detail 使用
   state._lastRankings = rankings;
   document.getElementById('detailPanel').innerHTML = '';
 }
@@ -489,52 +453,25 @@ function showGroupDetail(groupId, groupName, members) {
 // ===== 重置评分 =====
 async function resetScores() {
   if (!confirm('确定要重置当前班级的所有评分数据吗？此操作不可恢复！🐱')) return;
-  if (!supabase) return;
 
-  const { error } = await supabase
-    .from('scores')
-    .delete()
-    .eq('class_id', state.currentClass);
-
-  if (error) {
-    showToast('😿 重置失败：' + error.message);
-    return;
-  }
-
-  state.scores = [];
-  showToast('🔄 数据已重置');
-  renderEvaluators();
-  renderTargets();
-  if (!document.getElementById('tabRanking').classList.contains('hidden')) {
-    loadRankings();
+  try {
+    await deleteScores(state.currentClass);
+    state.scores = [];
+    showToast('🔄 数据已重置');
+    renderEvaluators();
+    renderTargets();
+    if (!document.getElementById('tabRanking').classList.contains('hidden')) {
+      loadRankings();
+    }
+  } catch (e) {
+    showToast('😿 ' + e.message);
   }
 }
 
-// ===== 点击弹窗背景/键盘 Esc 关闭 =====
+// ===== 事件监听 =====
 document.addEventListener('click', function(e) {
   if (e.target.id === 'scoreModal') closeModal();
 });
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeModal();
 });
-
-// ===== 定时刷新排名（每30秒） =====
-let rankingInterval = null;
-const origSwitchTab = switchTab;
-switchTab = function(tab) {
-  origSwitchTab(tab);
-  if (tab === 'ranking') {
-    if (!rankingInterval) {
-      rankingInterval = setInterval(() => {
-        if (!document.getElementById('tabRanking').classList.contains('hidden')) {
-          loadRankings();
-        }
-      }, 30000);
-    }
-  } else {
-    if (rankingInterval) {
-      clearInterval(rankingInterval);
-      rankingInterval = null;
-    }
-  }
-};
