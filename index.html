@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐱 小组互评系统 - 喵~</title>
+<link rel="stylesheet" href="style.css">
+<!-- Supabase JS 客户端 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- 猫耳朵装饰 -->
+<div class="cat-ears">
+  <div class="ear ear-left"></div>
+  <div class="ear ear-right"></div>
+</div>
+
+<!-- 背景猫脚印 -->
+<div class="paw-bg" id="pawBackground"></div>
+
+<div class="container">
+  <!-- 头部 -->
+  <header class="header">
+    <div class="cat-face">
+      <div class="cat-eye left-eye"></div>
+      <div class="cat-eye right-eye"></div>
+      <div class="cat-nose"></div>
+      <div class="cat-whisker whisker-l1"></div>
+      <div class="cat-whisker whisker-l2"></div>
+      <div class="cat-whisker whisker-r1"></div>
+      <div class="cat-whisker whisker-r2"></div>
+    </div>
+    <h1 class="title">🐾 小组互评系统 <span class="meow">喵~</span></h1>
+    <p class="subtitle">实训结课作业 · 商务数据驱动决策实战</p>
+  </header>
+
+  <!-- 初次配置面板 -->
+  <section id="setupScreen" class="setup-screen hidden">
+    <div class="setup-card">
+      <div class="setup-cat">🐱</div>
+      <h2>首次使用 · 配置数据库</h2>
+      <p>请从 Supabase 项目设置中获取连接信息</p>
+      <div class="setup-form">
+        <div class="form-group">
+          <label>📡 Supabase 项目 URL</label>
+          <input type="text" id="setupUrl" placeholder="https://xxxxx.supabase.co">
+        </div>
+        <div class="form-group">
+          <label>🔑 Supabase Anon Key</label>
+          <input type="password" id="setupKey" placeholder="eyJhbGci...">
+        </div>
+        <button class="submit-btn" onclick="saveSetup()">🐾 连接数据库</button>
+      </div>
+      <p class="setup-hint">此配置将保存在浏览器中，下次访问无需重新输入</p>
+    </div>
+  </section>
+
+  <!-- 班级选择页 -->
+  <section id="classSelect" class="class-select hidden">
+    <div class="class-cards">
+      <div class="class-card" onclick="selectClass('class1')">
+        <div class="card-cat">🐱</div>
+        <h2>24商数一班</h2>
+        <p>13个小组</p>
+        <div class="paw-print">🐾</div>
+      </div>
+      <div class="class-card" onclick="selectClass('class2')">
+        <div class="card-cat">😺</div>
+        <h2>商数二班</h2>
+        <p>11个小组</p>
+        <div class="paw-print">🐾</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="mainApp" class="main-app hidden">
+    <!-- 顶部导航 -->
+    <nav class="top-nav">
+      <button class="back-btn" onclick="goBack()">🐾 返回班级选择</button>
+      <h2 id="className">24商数一班</h2>
+      <button class="reset-btn" onclick="resetScores()">🔄 重置数据</button>
+    </nav>
+
+    <!-- Tab 切换 -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('evaluate')">📝 互评打分</button>
+      <button class="tab-btn" onclick="switchTab('ranking')">🏆 实时排名</button>
+    </div>
+
+    <!-- 互评打分面板 -->
+    <div id="tabEvaluate" class="tab-content">
+      <div class="eval-layout">
+        <!-- 左侧：评分者选择 -->
+        <div class="panel panel-evaluator">
+          <h3>🙋 我是哪一组？</h3>
+          <div id="evaluatorList" class="group-grid"></div>
+        </div>
+
+        <!-- 右侧：被评小组 -->
+        <div class="panel panel-targets">
+          <h3>🎯 请为以下小组打分</h3>
+          <div id="targetList" class="target-list"></div>
+        </div>
+      </div>
+
+      <!-- 评分弹窗 -->
+      <div id="scoreModal" class="modal hidden">
+        <div class="modal-content">
+          <div class="modal-header">
+            <span class="modal-cat">😸</span>
+            <h3 id="modalTitle">为第X组打分</h3>
+            <button class="modal-close" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-body" id="modalBody"></div>
+          <div class="modal-footer">
+            <div class="total-display">总分：<span id="totalScore">0</span> / 100</div>
+            <button class="submit-btn" onclick="submitScore()">🐾 提交评分 喵~</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 排名面板 -->
+    <div id="tabRanking" class="tab-content hidden">
+      <div class="ranking-header">
+        <div class="ranking-stats" id="rankingStats"></div>
+        <button class="refresh-btn" onclick="loadRankings()">🔄 刷新排名</button>
+      </div>
+      <div class="ranking-body">
+        <div class="ranking-chart" id="rankingChart"></div>
+        <div class="ranking-list" id="rankingList"></div>
+      </div>
+      <div class="detail-panel" id="detailPanel"></div>
+    </div>
+  </section>
+
+  <!-- 底部猫尾巴 -->
+  <footer class="footer">
+    <div class="cat-tail"></div>
+    <p>🐱 猫猫互评系统 · 专为商务数据分析实训打造 · 喵~ 🐱</p>
+  </footer>
+</div>
+
+<!-- 配置文件（包含 Supabase 连接信息、分组数据等） -->
+<script src="config.js"></script>
+<!-- 主逻辑 -->
+<script src="script.js"></script>
+</body>
+</html>
